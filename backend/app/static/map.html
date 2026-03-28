@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SwarmRoute Interactive Map</title>
+    <!-- Leaflet Configuration -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: monospace; background: #0a0f18; color: #22d3ee; }
+        #map { height: 100vh; width: 100%; }
+        #ui { 
+            position: absolute; z-index: 1000; top: 20px; right: 20px; 
+            background: rgba(10, 15, 24, 0.9); padding: 20px; 
+            border: 1px solid #22d3ee; border-radius: 8px; width: 320px; 
+            box-shadow: 0 0 20px rgba(34,211,238,0.2); backdrop-filter: blur(5px); 
+        }
+        h3 { margin-top: 0; margin-bottom: 20px; text-transform: uppercase; border-bottom: 1px solid rgba(34,211,238,0.3); padding-bottom: 5px; }
+        button { 
+            background: #22d3ee; color: #000; outline: none; border: none; 
+            padding: 10px 15px; width: 100%; cursor: pointer; 
+            font-family: monospace; font-weight: bold; margin-top: 15px; border-radius: 4px; transition: 0.2s;
+        }
+        button:hover:not(:disabled) { background: #fff; box-shadow: 0 0 10px #22d3ee; }
+        button:disabled { background: #333; color: #666; cursor: not-allowed; }
+        .info { margin-bottom: 15px; font-size: 13px; color: #ccc; }
+        .hud { font-size: 11px; opacity: 0.7; margin-bottom: 5px; color: #fff; }
+        .result-box { margin-top: 15px; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 4px; border-left: 2px solid; }
+        .route-Primary { border-color: #22d3ee; }
+        .route-Alternative { border-color: #f59e0b; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h3>Live Swarm Routing</h3>
+        <div class="info">Select routing protocol parameters directly on the grid.</div>
+        <div class="hud" id="hud-origin">🟢 <b>Origin:</b> Awaiting Input...</div>
+        <div class="hud" id="hud-dest">🔴 <b>Destination:</b> Awaiting Input...</div>
+        <button id="calc-btn" disabled>Generate Swarm Routes</button>
+        <div id="results" style="margin-top: 20px; font-size: 11px; color: #ccc;"></div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        const map = L.map('map').setView([45.0, -20.0], 3);
+        // CartoDB Dark Matter for Cyber Aesthetic
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+        }).addTo(map);
+
+        let origin = null;
+        let dest = null;
+        let markers = [];
+        let polylines = [];
+        
+        // Define route styling
+        const routeStyles = {
+            'Primary': { color: '#22d3ee', weight: 4, dash: '' },
+            'Alternative 1': { color: '#f59e0b', weight: 2, dash: '5, 5' },
+            'Alternative 2': { color: '#10b981', weight: 2, dash: '2, 6' },
+            'Alternative 3': { color: '#ef4444', weight: 2, dash: '8, 8' }
+        };
+
+        map.on('click', function(e) {
+            if (!origin) {
+                // Set Origin
+                origin = e.latlng;
+                const m = L.circleMarker(origin, { color: '#22d3ee', fillColor: '#22d3ee', fillOpacity: 0.8, radius: 6 }).addTo(map);
+                markers.push(m);
+                document.getElementById('hud-origin').innerHTML = `🟢 <b>Origin:</b> ${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`;
+            } else if (!dest) {
+                // Set Destination
+                dest = e.latlng;
+                const m = L.circleMarker(dest, { color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.8, radius: 6 }).addTo(map);
+                markers.push(m);
+                document.getElementById('hud-dest').innerHTML = `🔴 <b>Destination:</b> ${dest.lat.toFixed(4)}, ${dest.lng.toFixed(4)}`;
+                document.getElementById('calc-btn').disabled = false;
+            } else {
+                // Reset Grid
+                origin = e.latlng;
+                dest = null;
+                markers.forEach(m => map.removeLayer(m));
+                polylines.forEach(p => map.removeLayer(p));
+                markers = [];
+                polylines = [];
+                
+                const m = L.circleMarker(origin, { color: '#22d3ee', fillColor: '#22d3ee', fillOpacity: 0.8, radius: 6 }).addTo(map);
+                markers.push(m);
+                
+                document.getElementById('hud-origin').innerHTML = `🟢 <b>Origin:</b> ${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`;
+                document.getElementById('hud-dest').innerHTML = `🔴 <b>Destination:</b> Awaiting Input...`;
+                document.getElementById('calc-btn').disabled = true;
+                document.getElementById('results').innerHTML = '';
+            }
+        });
+
+        document.getElementById('calc-btn').addEventListener('click', async () => {
+            document.getElementById('results').innerHTML = '<div style="text-align:center; padding: 10px;">Calibrating Swarm...</div>';
+            
+            // Clean old polylines
+            polylines.forEach(p => map.removeLayer(p));
+            polylines = [];
+            
+            try {
+                // Trigger full Swarm logic by hitting our unified Create API
+                const res = await fetch('/api/shipments/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        user_email: "operator@swarmroute.ai",
+                        source: { city: "Map Genesis", country: "Global Grid", lat: origin.lat, lon: origin.lng },
+                        destination: { city: "Map Terminus", country: "Global Grid", lat: dest.lat, lon: dest.lng },
+                        mode: "road",
+                        shipmentType: "Interactive Map Query",
+                        departureTime: new Date().toISOString(),
+                        deadline: new Date(Date.now() + 86400000 * 3).toISOString(), // 3 days
+                        priority: "speed"
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if (data.routes && data.routes.length > 0) {
+                    let html = `<div style="color: #22d3ee; margin-bottom: 5px;">> ${data.activated_agents.length} Agents Activated.</div>`;
+                    html += `<div style="color: #fff; margin-bottom: 10px;">> Composite Risk: ${data.composite_risk_score}</div>`;
+                    
+                    data.routes.forEach((route, idx) => {
+                        const styleKey = idx === 0 ? 'Primary' : `Alternative ${idx}`;
+                        const styleDesc = routeStyles[styleKey] || routeStyles['Alternative 1'];
+                        
+                        // Map precise polyline geometry onto map
+                        if (route.path && route.path.length > 0) {
+                            const latlngs = route.path.map(p => [p.lat, p.lon]);
+                            const pl = L.polyline(latlngs, { 
+                                color: styleDesc.color, 
+                                weight: styleDesc.weight, 
+                                dashArray: styleDesc.dash 
+                            }).addTo(map);
+                            polylines.push(pl);
+                        }
+                        
+                        html += `
+                            <div class="result-box route-${idx === 0 ? 'Primary' : 'Alternative'}" style="border-left-color: ${styleDesc.color}">
+                                <b style="color: ${styleDesc.color}">${route.type || styleKey} Route</b><br>
+                                <span>Dist: ${route.distance} km | Time: ${route.time_hours} hrs</span><br>
+                                <span>Risk: ${route.risk} | Score: ${route.composite_score}</span>
+                            </div>
+                        `;
+                    });
+                    
+                    document.getElementById('results').innerHTML = html;
+                    
+                    // Zoom map out to encompass full bounding box of paths
+                    if (polylines.length > 0) {
+                        const group = L.featureGroup(polylines);
+                        map.fitBounds(group.getBounds(), { padding: [50, 50] });
+                    }
+                } else {
+                    document.getElementById('results').innerHTML = 'Engine returned zero physical routes.';
+                }
+            } catch (err) {
+                console.error(err);
+                document.getElementById('results').innerHTML = 'Network constraint. Swarm API disconnected.';
+            }
+        });
+    </script>
+</body>
+</html>

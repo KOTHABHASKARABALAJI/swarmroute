@@ -1,0 +1,20 @@
+# Python Cache Environments
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.env/
+.venv/
+
+# Secrets & Environment Files
+.env
+.env.local
+.env.*
+
+# Local SQLite Databases
+*.db
+*.sqlite3
+swarmroute.db
